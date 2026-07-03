@@ -204,7 +204,7 @@
   <div class="global-ctrls">
     <button class="g-btn" id="playAll">▶ 전체재생</button>
     <button class="g-btn" id="pauseAll">⏸ 전체정지</button>
-    <button class="g-btn" id="muteAll">🔇 음소거</button>
+    <button class="g-btn" id="muteAll">🔊 음소거 해제</button>
   </div>
 </header>
 
@@ -260,7 +260,7 @@ function createSlot(i) {
   const el = document.createElement('div');
   el.className = 'slot paused';
   el.innerHTML = `
-    <video playsinline webkit-playsinline preload="metadata"></video>
+    <video playsinline webkit-playsinline preload="metadata" muted></video>
     <input type="file" accept="video/*,.mp4,.mov,.m4v,.webm">
     <div class="empty">
       ${ICONS.film}
@@ -280,7 +280,7 @@ function createSlot(i) {
       </div>
       <div class="btns">
         <button class="cbtn toggle">${ICONS.play}</button>
-        <button class="cbtn mute">${ICONS.volOn}</button>
+        <button class="cbtn mute">${ICONS.volOff}</button>
         <span class="time">0:00 / 0:00</span>
         <span class="spacer"></span>
         <button class="cbtn rate-btn">1x</button>
@@ -308,6 +308,12 @@ function createSlot(i) {
   const dot     = el.querySelector('.dot');
 
   const slot = { el, video, rateIdx: 2, objectUrl: null };
+
+  // iOS/Safari는 소리가 있는 영상이 여러 개 동시에 재생되면 나중에 재생한
+  // 영상이 이전 영상을 자동으로 일시정지시킴(하나의 오디오 세션만 허용).
+  // 기본값을 음소거로 두어 여러 영상이 실제로 동시에 재생되게 하고,
+  // 소리가 필요한 슬롯만 음소거 버튼으로 개별 해제하도록 함.
+  video.muted = true;
 
   /* 파일 선택 → iOS에서는 '파일' 앱 / 사진 보관함 선택창이 열림 */
   empty.addEventListener('click', () => file.click());
@@ -453,7 +459,7 @@ document.getElementById('playAll').addEventListener('click', () => {
 document.getElementById('pauseAll').addEventListener('click', () => {
   visibleSlots().forEach(s => s.video.pause());
 });
-let allMuted = false;
+let allMuted = true;
 document.getElementById('muteAll').addEventListener('click', function () {
   allMuted = !allMuted;
   slots.forEach(s => {
