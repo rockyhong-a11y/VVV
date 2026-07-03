@@ -25,16 +25,22 @@
     color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
     overscroll-behavior: none;
+    overflow: hidden;
   }
-  body { display: flex; flex-direction: column; }
 
-  /* ── 상단 바 ───────────────────────────── */
+  /* ── 상단 바 (항상 오버레이) ─────────────── */
   header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
     display: flex; align-items: center; gap: 12px;
     padding: calc(env(safe-area-inset-top, 0px) + 10px) 14px 10px;
-    background: var(--panel);
-    border-bottom: 1px solid #23262f;
+    background: linear-gradient(rgba(10,11,15,.92), rgba(10,11,15,.55) 80%, transparent);
     flex-wrap: wrap;
+    opacity: 1; transform: translateY(0);
+    transition: opacity .25s, transform .25s;
+    pointer-events: auto;
+  }
+  body.ui-hidden header {
+    opacity: 0; transform: translateY(-100%); pointer-events: none;
   }
   .logo { font-weight: 800; font-size: 17px; letter-spacing: .5px;
     background: linear-gradient(90deg, var(--accent), var(--accent-2));
@@ -54,11 +60,13 @@
   }
   .g-btn:active { background: #2a2e3a; }
 
-  /* ── 그리드 ───────────────────────────── */
+  /* ── 그리드 (전체 화면) ─────────────────── */
   #grid {
-    flex: 1; display: grid; gap: 6px; padding: 6px;
+    position: fixed; inset: 0;
+    display: grid; gap: 6px;
+    padding: calc(6px + env(safe-area-inset-top, 0px)) calc(6px + env(safe-area-inset-right, 0px))
+             calc(6px + env(safe-area-inset-bottom, 0px)) calc(6px + env(safe-area-inset-left, 0px));
     min-height: 0;
-    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 6px);
   }
   #grid[data-layout="1"] { grid-template-columns: 1fr; grid-template-rows: 1fr; }
   #grid[data-layout="2"] { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
@@ -78,7 +86,7 @@
     overflow: hidden; min-height: 0; min-width: 0;
     border: 1px solid #1d2029;
   }
-  .slot video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+  .slot video { width: 100%; height: 100%; object-fit: fill; display: block; background: #000; }
 
   /* 빈 상태 */
   .empty {
@@ -102,7 +110,8 @@
     background: linear-gradient(transparent, rgba(0,0,0,.75));
     opacity: 0; transition: opacity .25s; pointer-events: none;
   }
-  .slot.loaded.show-ctrl .ctrl { opacity: 1; pointer-events: auto; }
+  .slot.loaded .ctrl { opacity: 1; pointer-events: auto; }
+  body.ui-hidden .slot.loaded .ctrl { opacity: 0; pointer-events: none; }
 
   /* 진행 바 */
   .progress {
@@ -164,7 +173,8 @@
     max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     opacity: 0; transition: opacity .25s;
   }
-  .slot.loaded.show-ctrl .badge { opacity: 1; }
+  .slot.loaded .badge { opacity: 1; }
+  body.ui-hidden .slot.loaded .badge { opacity: 0; }
 
   /* 교체 버튼 */
   .swap-btn {
@@ -174,17 +184,11 @@
     display: flex; align-items: center; justify-content: center;
     opacity: 0; transition: opacity .25s; pointer-events: none;
   }
-  .slot.loaded.show-ctrl .swap-btn { opacity: 1; pointer-events: auto; }
+  .slot.loaded .swap-btn { opacity: 1; pointer-events: auto; }
+  body.ui-hidden .slot.loaded .swap-btn { opacity: 0; pointer-events: none; }
   .swap-btn svg { width: 15px; height: 15px; fill: #fff; }
 
   input[type="file"] { display: none; }
-
-  /* 안내 문구 */
-  #hint {
-    text-align: center; font-size: 11px; color: var(--text-dim);
-    padding: 4px 12px calc(env(safe-area-inset-bottom, 0px) + 6px);
-    background: var(--bg);
-  }
 </style>
 </head>
 <body>
@@ -206,8 +210,6 @@
 
 <main id="grid" data-layout="1"></main>
 
-<div id="hint">아이폰: 이 파일을 Safari로 열고 슬롯을 탭하면 ‘파일’ 앱에서 영상을 선택할 수 있습니다.</div>
-
 <script>
 "use strict";
 
@@ -226,6 +228,23 @@ const ICONS = {
 const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
 const grid = document.getElementById('grid');
 const slots = [];
+
+/* ── 전체 UI 표시/숨김 (오버레이) ──────────
+   재생이 시작되면 잠시 후 모든 UI(상단 바 + 컨트롤 바)가 사라지고,
+   화면을 더블 탭하면 UI가 오버레이 형태로 다시 나타남 */
+let hideTimer = null;
+function anyPlaying() {
+  return slots.some(s => s.el.classList.contains('loaded') && !s.video.paused);
+}
+function setUiHidden(hidden) {
+  document.body.classList.toggle('ui-hidden', hidden);
+}
+function scheduleAutoHide() {
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => {
+    if (anyPlaying()) setUiHidden(true);
+  }, 3000);
+}
 
 /* ── 시간 포맷 ─────────────────────────── */
 function fmt(t) {
@@ -288,7 +307,7 @@ function createSlot(i) {
   const buffered= el.querySelector('.buffered');
   const dot     = el.querySelector('.dot');
 
-  const slot = { el, video, rateIdx: 2, objectUrl: null, hideTimer: null };
+  const slot = { el, video, rateIdx: 2, objectUrl: null };
 
   /* 파일 선택 → iOS에서는 '파일' 앱 / 사진 보관함 선택창이 열림 */
   empty.addEventListener('click', () => file.click());
@@ -301,16 +320,30 @@ function createSlot(i) {
     video.src = slot.objectUrl;
     badge.textContent = f.name;
     el.classList.add('loaded');
-    showCtrl();
-    video.play().catch(() => {});
+    setUiHidden(false);
+    // 자동재생 대신 큰 재생 버튼을 직접 눌러 시작하게 하여(항상 사용자 제스처 보장)
+    // 여러 슬롯을 연속 선택해도 모두 안정적으로 재생되도록 함
   });
 
   /* 재생/일시정지 */
-  function togglePlay() { video.paused ? video.play().catch(()=>{}) : video.pause(); }
+  function togglePlay() {
+    if (video.paused) {
+      video.play().catch(err => console.warn('play() failed for slot', i, err));
+    } else {
+      video.pause();
+    }
+  }
   toggle.addEventListener('click', togglePlay);
   bigPlay.addEventListener('click', togglePlay);
-  video.addEventListener('play',  () => { el.classList.remove('paused'); toggle.innerHTML = ICONS.pause; });
-  video.addEventListener('pause', () => { el.classList.add('paused');    toggle.innerHTML = ICONS.play;  showCtrl(); });
+  video.addEventListener('play',  () => {
+    el.classList.remove('paused'); toggle.innerHTML = ICONS.pause;
+    setUiHidden(false); scheduleAutoHide();
+  });
+  video.addEventListener('pause', () => {
+    el.classList.add('paused'); toggle.innerHTML = ICONS.play;
+    setUiHidden(false);
+    if (anyPlaying()) scheduleAutoHide(); else clearTimeout(hideTimer);
+  });
   video.addEventListener('ended', () => { el.classList.add('paused');    toggle.innerHTML = ICONS.play;  });
 
   /* 음소거 */
@@ -391,21 +424,8 @@ function createSlot(i) {
     prog.classList.remove('dragging');
     if (seekTarget != null) video.currentTime = seekTarget;
     seekTarget = null;
-    showCtrl();
-  });
-
-  /* 컨트롤 자동 숨김 */
-  function showCtrl() {
-    el.classList.add('show-ctrl');
-    clearTimeout(slot.hideTimer);
-    slot.hideTimer = setTimeout(() => {
-      if (!video.paused) el.classList.remove('show-ctrl');
-    }, 3000);
-  }
-  el.addEventListener('pointermove', () => { if (el.classList.contains('loaded')) showCtrl(); });
-  video.addEventListener('click', () => {
-    if (!el.classList.contains('loaded')) return;
-    el.classList.contains('show-ctrl') && !video.paused ? el.classList.remove('show-ctrl') : showCtrl();
+    setUiHidden(false);
+    if (!video.paused) scheduleAutoHide();
   });
 
   slots.push(slot);
@@ -441,6 +461,22 @@ document.getElementById('muteAll').addEventListener('click', function () {
     s.el.querySelector('.mute').innerHTML = allMuted ? ICONS.volOff : ICONS.volOn;
   });
   this.textContent = allMuted ? '🔊 음소거 해제' : '🔇 음소거';
+});
+
+/* ── 더블 탭으로 UI 토글 (오버레이) ─────── */
+let lastTap = { time: 0, x: 0, y: 0 };
+grid.addEventListener('pointerup', e => {
+  if (e.target.closest('.ctrl, .empty, .swap-btn, .big-play')) { lastTap.time = 0; return; }
+  const now = Date.now();
+  const dx = e.clientX - lastTap.x, dy = e.clientY - lastTap.y;
+  if (now - lastTap.time < 350 && Math.hypot(dx, dy) < 30) {
+    const wasHidden = document.body.classList.contains('ui-hidden');
+    setUiHidden(!wasHidden);
+    if (wasHidden && anyPlaying()) scheduleAutoHide(); else if (!wasHidden) clearTimeout(hideTimer);
+    lastTap.time = 0;
+  } else {
+    lastTap = { time: now, x: e.clientX, y: e.clientY };
+  }
 });
 </script>
 </body>
