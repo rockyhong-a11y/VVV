@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>VVV 멀티 비디오 플레이어</title>
+<style>
+  :root {
+    --bg: #0e0f13;
+    --panel: #16181f;
+    --panel-2: #1e212b;
+    --accent: #5f8bff;
+    --accent-2: #7c5fff;
+    --text: #eef0f6;
+    --text-dim: #8a90a3;
+    --ctrl-h: 44px;
+    --radius: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    overscroll-behavior: none;
+  }
+  body { display: flex; flex-direction: column; }
+
+  /* ── 상단 바 ───────────────────────────── */
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: calc(env(safe-area-inset-top, 0px) + 10px) 14px 10px;
+    background: var(--panel);
+    border-bottom: 1px solid #23262f;
+    flex-wrap: wrap;
+  }
+  .logo { font-weight: 800; font-size: 17px; letter-spacing: .5px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .layout-picker { display: flex; gap: 6px; }
+  .layout-btn {
+    width: 38px; height: 32px; border-radius: 8px; border: 1px solid #2a2e3a;
+    background: var(--panel-2); color: var(--text-dim);
+    font-size: 13px; font-weight: 700; cursor: pointer; transition: all .15s;
+  }
+  .layout-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .global-ctrls { margin-left: auto; display: flex; gap: 6px; }
+  .g-btn {
+    height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #2a2e3a;
+    background: var(--panel-2); color: var(--text); font-size: 13px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px; transition: background .15s;
+  }
+  .g-btn:active { background: #2a2e3a; }
+
+  /* ── 그리드 ───────────────────────────── */
+  #grid {
+    flex: 1; display: grid; gap: 6px; padding: 6px;
+    min-height: 0;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 6px);
+  }
+  #grid[data-layout="1"] { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+  #grid[data-layout="2"] { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+  #grid[data-layout="3"] { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+  #grid[data-layout="4"] { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+  @media (orientation: landscape) {
+    #grid[data-layout="2"] { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
+  }
+  #grid[data-layout="3"] .slot:nth-child(1) { grid-column: 1 / -1; }
+  #grid[data-layout="1"] .slot:nth-child(n+2),
+  #grid[data-layout="2"] .slot:nth-child(n+3),
+  #grid[data-layout="3"] .slot:nth-child(n+4) { display: none; }
+
+  /* ── 플레이어 슬롯 ─────────────────────── */
+  .slot {
+    position: relative; background: #000; border-radius: var(--radius);
+    overflow: hidden; min-height: 0; min-width: 0;
+    border: 1px solid #1d2029;
+  }
+  .slot video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+
+  /* 빈 상태 */
+  .empty {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px;
+    background: radial-gradient(ellipse at center, #171a22 0%, #0d0e12 100%);
+    cursor: pointer; z-index: 5;
+  }
+  .empty svg { width: 42px; height: 42px; opacity: .85; }
+  .empty span { font-size: 13px; color: var(--text-dim); }
+  .empty .pick-label {
+    padding: 8px 18px; border-radius: 999px; font-size: 13px; font-weight: 600; color: #fff;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  }
+  .slot.loaded .empty { display: none; }
+
+  /* ── nPlayer 스타일 컨트롤 바 ───────────── */
+  .ctrl {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 10;
+    padding: 26px 10px 8px;
+    background: linear-gradient(transparent, rgba(0,0,0,.75));
+    opacity: 0; transition: opacity .25s; pointer-events: none;
+  }
+  .slot.loaded.show-ctrl .ctrl { opacity: 1; pointer-events: auto; }
+
+  /* 진행 바 */
+  .progress {
+    position: relative; height: 16px; display: flex; align-items: center;
+    cursor: pointer; touch-action: none; margin-bottom: 2px;
+  }
+  .progress .track {
+    position: relative; width: 100%; height: 3px; border-radius: 3px;
+    background: rgba(255,255,255,.25); transition: height .15s;
+  }
+  .progress:hover .track, .progress.dragging .track { height: 5px; }
+  .progress .buffered {
+    position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px;
+    background: rgba(255,255,255,.35); width: 0;
+  }
+  .progress .played {
+    position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2)); width: 0;
+  }
+  .progress .dot {
+    position: absolute; top: 50%; width: 13px; height: 13px; border-radius: 50%;
+    background: #fff; box-shadow: 0 0 6px rgba(0,0,0,.6);
+    transform: translate(-50%, -50%) scale(0); transition: transform .15s; left: 0;
+  }
+  .progress:hover .dot, .progress.dragging .dot { transform: translate(-50%, -50%) scale(1); }
+
+  /* 버튼 줄 */
+  .btns { display: flex; align-items: center; gap: 4px; }
+  .cbtn {
+    width: 34px; height: 30px; border: 0; background: transparent; color: #fff;
+    cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 6px; flex-shrink: 0;
+  }
+  .cbtn:active { background: rgba(255,255,255,.15); }
+  .cbtn svg { width: 19px; height: 19px; fill: #fff; }
+  .time { font-size: 11.5px; color: rgba(255,255,255,.9); font-variant-numeric: tabular-nums; margin: 0 4px; white-space: nowrap; }
+  .spacer { flex: 1; }
+  .rate-btn { font-size: 12px; font-weight: 700; color: #fff; width: auto; padding: 0 8px; }
+
+  /* 중앙 재생 오버레이 */
+  .big-play {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    z-index: 6; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  .slot.loaded.paused .big-play { opacity: 1; pointer-events: auto; }
+  .big-play .circle {
+    width: 58px; height: 58px; border-radius: 50%;
+    background: rgba(0,0,0,.55); backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+    border: 1.5px solid rgba(255,255,255,.35);
+  }
+  .big-play svg { width: 26px; height: 26px; fill: #fff; margin-left: 3px; }
+
+  /* 슬롯 이름표 */
+  .badge {
+    position: absolute; top: 8px; left: 8px; z-index: 7;
+    font-size: 11px; padding: 3px 9px; border-radius: 999px;
+    background: rgba(0,0,0,.55); color: rgba(255,255,255,.85);
+    max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    opacity: 0; transition: opacity .25s;
+  }
+  .slot.loaded.show-ctrl .badge { opacity: 1; }
+
+  /* 교체 버튼 */
+  .swap-btn {
+    position: absolute; top: 6px; right: 6px; z-index: 7;
+    width: 30px; height: 30px; border-radius: 50%; border: 0;
+    background: rgba(0,0,0,.55); color: #fff; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity .25s; pointer-events: none;
+  }
+  .slot.loaded.show-ctrl .swap-btn { opacity: 1; pointer-events: auto; }
+  .swap-btn svg { width: 15px; height: 15px; fill: #fff; }
+
+  input[type="file"] { display: none; }
+
+  /* 안내 문구 */
+  #hint {
+    text-align: center; font-size: 11px; color: var(--text-dim);
+    padding: 4px 12px calc(env(safe-area-inset-bottom, 0px) + 6px);
+    background: var(--bg);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">VVV PLAYER</div>
+  <div class="layout-picker" id="layoutPicker">
+    <button class="layout-btn active" data-n="1">1</button>
+    <button class="layout-btn" data-n="2">2</button>
+    <button class="layout-btn" data-n="3">3</button>
+    <button class="layout-btn" data-n="4">4</button>
+  </div>
+  <div class="global-ctrls">
+    <button class="g-btn" id="playAll">▶ 전체재생</button>
+    <button class="g-btn" id="pauseAll">⏸ 전체정지</button>
+    <button class="g-btn" id="muteAll">🔇 음소거</button>
+  </div>
+</header>
+
+<main id="grid" data-layout="1"></main>
+
+<div id="hint">아이폰: 이 파일을 Safari로 열고 슬롯을 탭하면 ‘파일’ 앱에서 영상을 선택할 수 있습니다.</div>
+
+<script>
+"use strict";
+
+/* ── SVG 아이콘 ─────────────────────────── */
+const ICONS = {
+  play:  '<svg viewBox="0 0 24 24"><path d="M8 5.14v13.72c0 .8.87 1.3 1.55.88l10.8-6.86a1.05 1.05 0 0 0 0-1.76L9.55 4.26A1.04 1.04 0 0 0 8 5.14z"/></svg>',
+  pause: '<svg viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>',
+  volOn: '<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>',
+  volOff:'<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm14.6 3 2.6-2.6-1.4-1.4-2.6 2.6-2.6-2.6-1.4 1.4 2.6 2.6-2.6 2.6 1.4 1.4 2.6-2.6 2.6 2.6 1.4-1.4-2.6-2.6z"/></svg>',
+  full:  '<svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>',
+  pip:   '<svg viewBox="0 0 24 24"><path d="M19 11h-8v6h8v-6zm4 8V5a2 2 0 0 0-2-2H3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2zm-2 0H3V5h18v14z"/></svg>',
+  swap:  '<svg viewBox="0 0 24 24"><path d="M12 4V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-9z"/></svg>',
+  film:  '<svg viewBox="0 0 24 24" fill="none" stroke="#5f8bff" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 9h18M3 15h18M8 5v14M16 5v14"/></svg>',
+};
+
+const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
+const grid = document.getElementById('grid');
+const slots = [];
+
+/* ── 시간 포맷 ─────────────────────────── */
+function fmt(t) {
+  if (!isFinite(t)) return '0:00';
+  t = Math.max(0, Math.floor(t));
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+  const mm = h ? String(m).padStart(2, '0') : m;
+  return (h ? h + ':' : '') + mm + ':' + String(s).padStart(2, '0');
+}
+
+/* ── 슬롯 생성 ─────────────────────────── */
+function createSlot(i) {
+  const el = document.createElement('div');
+  el.className = 'slot paused';
+  el.innerHTML = `
+    <video playsinline webkit-playsinline preload="metadata"></video>
+    <input type="file" accept="video/*,.mp4,.mov,.m4v,.webm">
+    <div class="empty">
+      ${ICONS.film}
+      <div class="pick-label">영상 선택</div>
+      <span>슬롯 ${i + 1} · 파일 앱에서 불러오기</span>
+    </div>
+    <div class="badge"></div>
+    <button class="swap-btn" title="영상 교체">${ICONS.swap}</button>
+    <div class="big-play"><div class="circle">${ICONS.play}</div></div>
+    <div class="ctrl">
+      <div class="progress">
+        <div class="track">
+          <div class="buffered"></div>
+          <div class="played"></div>
+          <div class="dot"></div>
+        </div>
+      </div>
+      <div class="btns">
+        <button class="cbtn toggle">${ICONS.play}</button>
+        <button class="cbtn mute">${ICONS.volOn}</button>
+        <span class="time">0:00 / 0:00</span>
+        <span class="spacer"></span>
+        <button class="cbtn rate-btn">1x</button>
+        <button class="cbtn pip">${ICONS.pip}</button>
+        <button class="cbtn full">${ICONS.full}</button>
+      </div>
+    </div>`;
+  grid.appendChild(el);
+
+  const video   = el.querySelector('video');
+  const file    = el.querySelector('input[type=file]');
+  const empty   = el.querySelector('.empty');
+  const badge   = el.querySelector('.badge');
+  const swapBtn = el.querySelector('.swap-btn');
+  const bigPlay = el.querySelector('.big-play');
+  const toggle  = el.querySelector('.toggle');
+  const muteBtn = el.querySelector('.mute');
+  const timeEl  = el.querySelector('.time');
+  const rateBtn = el.querySelector('.rate-btn');
+  const pipBtn  = el.querySelector('.pip');
+  const fullBtn = el.querySelector('.full');
+  const prog    = el.querySelector('.progress');
+  const played  = el.querySelector('.played');
+  const buffered= el.querySelector('.buffered');
+  const dot     = el.querySelector('.dot');
+
+  const slot = { el, video, rateIdx: 2, objectUrl: null, hideTimer: null };
+
+  /* 파일 선택 → iOS에서는 '파일' 앱 / 사진 보관함 선택창이 열림 */
+  empty.addEventListener('click', () => file.click());
+  swapBtn.addEventListener('click', e => { e.stopPropagation(); file.click(); });
+  file.addEventListener('change', () => {
+    const f = file.files && file.files[0];
+    if (!f) return;
+    if (slot.objectUrl) URL.revokeObjectURL(slot.objectUrl);
+    slot.objectUrl = URL.createObjectURL(f);
+    video.src = slot.objectUrl;
+    badge.textContent = f.name;
+    el.classList.add('loaded');
+    showCtrl();
+    video.play().catch(() => {});
+  });
+
+  /* 재생/일시정지 */
+  function togglePlay() { video.paused ? video.play().catch(()=>{}) : video.pause(); }
+  toggle.addEventListener('click', togglePlay);
+  bigPlay.addEventListener('click', togglePlay);
+  video.addEventListener('play',  () => { el.classList.remove('paused'); toggle.innerHTML = ICONS.pause; });
+  video.addEventListener('pause', () => { el.classList.add('paused');    toggle.innerHTML = ICONS.play;  showCtrl(); });
+  video.addEventListener('ended', () => { el.classList.add('paused');    toggle.innerHTML = ICONS.play;  });
+
+  /* 음소거 */
+  muteBtn.addEventListener('click', () => {
+    video.muted = !video.muted;
+    muteBtn.innerHTML = video.muted ? ICONS.volOff : ICONS.volOn;
+  });
+
+  /* 배속 */
+  rateBtn.addEventListener('click', () => {
+    slot.rateIdx = (slot.rateIdx + 1) % RATES.length;
+    video.playbackRate = RATES[slot.rateIdx];
+    rateBtn.textContent = RATES[slot.rateIdx] + 'x';
+  });
+
+  /* PiP */
+  pipBtn.addEventListener('click', () => {
+    if (video.webkitSupportsPresentationMode && typeof video.webkitSetPresentationMode === 'function') {
+      video.webkitSetPresentationMode(
+        video.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
+    } else if (document.pictureInPictureElement === video) {
+      document.exitPictureInPicture().catch(()=>{});
+    } else if (document.pictureInPictureEnabled) {
+      video.requestPictureInPicture().catch(()=>{});
+    }
+  });
+
+  /* 전체화면 (iOS Safari는 video 자체 전체화면 사용) */
+  fullBtn.addEventListener('click', () => {
+    if (el.requestFullscreen) {
+      document.fullscreenElement === el ? document.exitFullscreen() : el.requestFullscreen();
+    } else if (video.webkitEnterFullscreen) {
+      video.webkitEnterFullscreen();
+    }
+  });
+
+  /* 진행 바 표시 */
+  video.addEventListener('timeupdate', () => {
+    if (!prog.classList.contains('dragging')) render(video.currentTime);
+    timeEl.textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration);
+  });
+  video.addEventListener('loadedmetadata', () => {
+    timeEl.textContent = fmt(0) + ' / ' + fmt(video.duration);
+  });
+  video.addEventListener('progress', () => {
+    try {
+      if (video.buffered.length && isFinite(video.duration)) {
+        buffered.style.width = (video.buffered.end(video.buffered.length - 1) / video.duration * 100) + '%';
+      }
+    } catch (e) {}
+  });
+  function render(t) {
+    const pct = isFinite(video.duration) && video.duration > 0 ? t / video.duration * 100 : 0;
+    played.style.width = pct + '%';
+    dot.style.left = pct + '%';
+  }
+
+  /* 진행 바 탐색 (마우스+터치) */
+  function seekAt(clientX) {
+    const r = prog.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+    if (isFinite(video.duration)) {
+      render(ratio * video.duration);
+      return ratio * video.duration;
+    }
+    return null;
+  }
+  let seekTarget = null;
+  prog.addEventListener('pointerdown', e => {
+    prog.classList.add('dragging');
+    prog.setPointerCapture(e.pointerId);
+    seekTarget = seekAt(e.clientX);
+  });
+  prog.addEventListener('pointermove', e => {
+    if (prog.classList.contains('dragging')) seekTarget = seekAt(e.clientX);
+  });
+  prog.addEventListener('pointerup', e => {
+    prog.classList.remove('dragging');
+    if (seekTarget != null) video.currentTime = seekTarget;
+    seekTarget = null;
+    showCtrl();
+  });
+
+  /* 컨트롤 자동 숨김 */
+  function showCtrl() {
+    el.classList.add('show-ctrl');
+    clearTimeout(slot.hideTimer);
+    slot.hideTimer = setTimeout(() => {
+      if (!video.paused) el.classList.remove('show-ctrl');
+    }, 3000);
+  }
+  el.addEventListener('pointermove', () => { if (el.classList.contains('loaded')) showCtrl(); });
+  video.addEventListener('click', () => {
+    if (!el.classList.contains('loaded')) return;
+    el.classList.contains('show-ctrl') && !video.paused ? el.classList.remove('show-ctrl') : showCtrl();
+  });
+
+  slots.push(slot);
+  return slot;
+}
+
+for (let i = 0; i < 4; i++) createSlot(i);
+
+/* ── 레이아웃 전환 ─────────────────────── */
+document.getElementById('layoutPicker').addEventListener('click', e => {
+  const btn = e.target.closest('.layout-btn');
+  if (!btn) return;
+  document.querySelectorAll('.layout-btn').forEach(b => b.classList.toggle('active', b === btn));
+  grid.dataset.layout = btn.dataset.n;
+  const n = +btn.dataset.n;
+  slots.forEach((s, i) => { if (i >= n && !s.video.paused) s.video.pause(); });
+});
+
+/* ── 전체 컨트롤 ───────────────────────── */
+const visibleSlots = () => slots.slice(0, +grid.dataset.layout).filter(s => s.el.classList.contains('loaded'));
+
+document.getElementById('playAll').addEventListener('click', () => {
+  visibleSlots().forEach(s => s.video.play().catch(()=>{}));
+});
+document.getElementById('pauseAll').addEventListener('click', () => {
+  visibleSlots().forEach(s => s.video.pause());
+});
+let allMuted = false;
+document.getElementById('muteAll').addEventListener('click', function () {
+  allMuted = !allMuted;
+  slots.forEach(s => {
+    s.video.muted = allMuted;
+    s.el.querySelector('.mute').innerHTML = allMuted ? ICONS.volOff : ICONS.volOn;
+  });
+  this.textContent = allMuted ? '🔊 음소거 해제' : '🔇 음소거';
+});
+</script>
+</body>
+</html>
