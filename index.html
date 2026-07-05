@@ -101,6 +101,10 @@
     padding: 8px 18px; border-radius: 999px; font-size: 13px; font-weight: 600; color: #fff;
     background: linear-gradient(90deg, var(--accent), var(--accent-2));
   }
+  .empty .url-link {
+    background: none; border: 0; color: var(--accent); font-size: 12.5px;
+    text-decoration: underline; cursor: pointer; padding: 4px; font-family: inherit;
+  }
   .slot.loaded .empty { display: none; }
 
   /* ── nPlayer 스타일 컨트롤 바 ───────────── */
@@ -188,6 +192,47 @@
   body.ui-hidden .slot.loaded .swap-btn { opacity: 0; pointer-events: none; }
   .swap-btn svg { width: 15px; height: 15px; fill: #fff; }
 
+  /* URL 재생 버튼 (교체 버튼 옆) */
+  .url-btn {
+    position: absolute; top: 6px; right: 44px; z-index: 7;
+    width: 30px; height: 30px; border-radius: 50%; border: 0;
+    background: rgba(0,0,0,.55); color: #fff; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity .25s; pointer-events: none;
+  }
+  .slot.loaded .url-btn { opacity: 1; pointer-events: auto; }
+  body.ui-hidden .slot.loaded .url-btn { opacity: 0; pointer-events: none; }
+  .url-btn svg { width: 15px; height: 15px; fill: #fff; }
+
+  /* URL 입력 패널 */
+  .url-panel {
+    position: absolute; inset: 0; z-index: 30;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(6,7,10,.85); backdrop-filter: blur(3px);
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+    padding: 16px;
+  }
+  .url-panel.show { opacity: 1; pointer-events: auto; }
+  .url-panel-box {
+    width: 100%; max-width: 320px;
+    background: var(--panel-2); border: 1px solid #2a2e3a; border-radius: var(--radius);
+    padding: 14px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .url-panel-title { font-size: 13px; font-weight: 700; color: var(--text); }
+  .url-hint { font-size: 11px; color: var(--text-dim); line-height: 1.4; }
+  .url-input {
+    width: 100%; height: 38px; border-radius: 8px; border: 1px solid #2a2e3a;
+    background: #10121a; color: var(--text); font-size: 13px; padding: 0 10px;
+  }
+  .url-input:focus { outline: 2px solid var(--accent); }
+  .url-error { font-size: 11.5px; color: #ff6b6b; min-height: 14px; }
+  .url-panel-btns { display: flex; gap: 8px; justify-content: flex-end; }
+  .url-panel-btns button {
+    height: 32px; padding: 0 14px; border-radius: 8px; border: 0; font-size: 13px; cursor: pointer;
+  }
+  .url-cancel { background: #2a2e3a; color: var(--text); }
+  .url-load { background: linear-gradient(90deg, var(--accent), var(--accent-2)); color: #fff; font-weight: 600; }
+
   input[type="file"] { display: none; }
 </style>
 </head>
@@ -223,6 +268,7 @@ const ICONS = {
   pip:   '<svg viewBox="0 0 24 24"><path d="M19 11h-8v6h8v-6zm4 8V5a2 2 0 0 0-2-2H3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2zm-2 0H3V5h18v14z"/></svg>',
   swap:  '<svg viewBox="0 0 24 24"><path d="M12 4V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-9z"/></svg>',
   film:  '<svg viewBox="0 0 24 24" fill="none" stroke="#5f8bff" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 9h18M3 15h18M8 5v14M16 5v14"/></svg>',
+  link:  '<svg viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg>',
 };
 
 const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -266,9 +312,23 @@ function createSlot(i) {
       ${ICONS.film}
       <div class="pick-label">영상 선택</div>
       <span>슬롯 ${i + 1} · 파일 앱에서 불러오기</span>
+      <button class="url-link" type="button">또는 URL로 재생</button>
     </div>
     <div class="badge"></div>
+    <button class="url-btn" title="URL로 재생">${ICONS.link}</button>
     <button class="swap-btn" title="영상 교체">${ICONS.swap}</button>
+    <div class="url-panel">
+      <div class="url-panel-box">
+        <div class="url-panel-title">영상 URL 입력</div>
+        <div class="url-hint">mp4·m3u8 등 직접 재생 가능한 영상 파일 주소만 지원합니다 (유튜브 등 일반 웹페이지 링크는 불가)</div>
+        <input class="url-input" type="url" placeholder="https://example.com/video.mp4" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <div class="url-error"></div>
+        <div class="url-panel-btns">
+          <button class="url-cancel" type="button">취소</button>
+          <button class="url-load" type="button">재생</button>
+        </div>
+      </div>
+    </div>
     <div class="big-play"><div class="circle">${ICONS.play}</div></div>
     <div class="ctrl">
       <div class="progress">
@@ -295,6 +355,13 @@ function createSlot(i) {
   const empty   = el.querySelector('.empty');
   const badge   = el.querySelector('.badge');
   const swapBtn = el.querySelector('.swap-btn');
+  const urlLink   = el.querySelector('.url-link');
+  const urlBtn    = el.querySelector('.url-btn');
+  const urlPanel  = el.querySelector('.url-panel');
+  const urlInput  = el.querySelector('.url-input');
+  const urlError  = el.querySelector('.url-error');
+  const urlCancel = el.querySelector('.url-cancel');
+  const urlLoadBtn= el.querySelector('.url-load');
   const bigPlay = el.querySelector('.big-play');
   const toggle  = el.querySelector('.toggle');
   const muteBtn = el.querySelector('.mute');
@@ -315,20 +382,71 @@ function createSlot(i) {
   // 소리가 필요한 슬롯만 음소거 버튼으로 개별 해제하도록 함.
   video.muted = true;
 
+  /* 영상 소스 적용 (파일/URL 공통) — 자동재생 대신 큰 재생 버튼을 직접 눌러
+     시작하게 하여(항상 사용자 제스처 보장) 여러 슬롯을 연속 선택해도 모두
+     안정적으로 재생되도록 함 */
+  function activate(src, label, blobUrl) {
+    if (slot.objectUrl) { URL.revokeObjectURL(slot.objectUrl); slot.objectUrl = null; }
+    if (blobUrl) slot.objectUrl = src;
+    video.src = src;
+    badge.textContent = label;
+    badge.title = label;
+    el.classList.add('loaded');
+    setUiHidden(false);
+  }
+
   /* 파일 선택 → iOS에서는 '파일' 앱 / 사진 보관함 선택창이 열림 */
   empty.addEventListener('click', () => file.click());
   swapBtn.addEventListener('click', e => { e.stopPropagation(); file.click(); });
   file.addEventListener('change', () => {
     const f = file.files && file.files[0];
     if (!f) return;
-    if (slot.objectUrl) URL.revokeObjectURL(slot.objectUrl);
-    slot.objectUrl = URL.createObjectURL(f);
-    video.src = slot.objectUrl;
-    badge.textContent = f.name;
-    el.classList.add('loaded');
+    activate(URL.createObjectURL(f), f.name, true);
+  });
+
+  /* URL로 재생 */
+  function openUrlPanel() {
+    urlError.textContent = '';
+    urlPanel.classList.add('show');
     setUiHidden(false);
-    // 자동재생 대신 큰 재생 버튼을 직접 눌러 시작하게 하여(항상 사용자 제스처 보장)
-    // 여러 슬롯을 연속 선택해도 모두 안정적으로 재생되도록 함
+    clearTimeout(hideTimer);
+    setTimeout(() => urlInput.focus(), 50);
+  }
+  function closeUrlPanel() {
+    urlPanel.classList.remove('show');
+    urlInput.value = '';
+    urlError.textContent = '';
+    if (anyPlaying()) scheduleAutoHide();
+  }
+  function tryLoadUrl() {
+    const raw = urlInput.value.trim();
+    if (!raw) { urlError.textContent = '주소를 입력하세요.'; return; }
+    let parsed;
+    try { parsed = new URL(raw); } catch (err) { urlError.textContent = '올바른 URL 형식이 아닙니다.'; return; }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      urlError.textContent = 'http(s) 주소만 지원합니다.';
+      return;
+    }
+    const rawName = parsed.pathname.split('/').filter(Boolean).pop() || parsed.hostname;
+    let label;
+    try { label = decodeURIComponent(rawName); } catch (err) { label = rawName; }
+    activate(parsed.href, label, false);
+    closeUrlPanel();
+  }
+  urlLink.addEventListener('click', e => { e.stopPropagation(); openUrlPanel(); });
+  urlBtn.addEventListener('click', e => { e.stopPropagation(); openUrlPanel(); });
+  urlCancel.addEventListener('click', e => { e.stopPropagation(); closeUrlPanel(); });
+  urlLoadBtn.addEventListener('click', e => { e.stopPropagation(); tryLoadUrl(); });
+  urlPanel.addEventListener('click', e => { if (e.target === urlPanel) closeUrlPanel(); });
+  urlInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); tryLoadUrl(); }
+  });
+  video.addEventListener('error', () => {
+    if (!el.classList.contains('loaded')) return;
+    console.warn('video load error on slot', i, video.error);
+    urlError.textContent = 'URL에서 영상을 불러오지 못했습니다. 직접 재생 가능한 영상 파일 주소인지 확인하세요.';
+    urlPanel.classList.add('show');
+    setUiHidden(false);
   });
 
   /* 재생/일시정지 */
@@ -472,7 +590,7 @@ document.getElementById('muteAll').addEventListener('click', function () {
 /* ── 더블 탭으로 UI 토글 (오버레이) ─────── */
 let lastTap = { time: 0, x: 0, y: 0 };
 grid.addEventListener('pointerup', e => {
-  if (e.target.closest('.ctrl, .empty, .swap-btn, .big-play')) { lastTap.time = 0; return; }
+  if (e.target.closest('.ctrl, .empty, .swap-btn, .url-btn, .url-panel, .big-play')) { lastTap.time = 0; return; }
   const now = Date.now();
   const dx = e.clientX - lastTap.x, dy = e.clientY - lastTap.y;
   if (now - lastTap.time < 350 && Math.hypot(dx, dy) < 30) {
