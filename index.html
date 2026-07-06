@@ -386,7 +386,7 @@
     <p>같은 시점 두 프레임을 픽셀 단위로 색상 값을 직접 비교합니다. 완전히 동일한 영상(같은 소스를 재인코딩한 경우 등)에서 아주 미세한 차이까지 잡아낼 때 적합합니다.</p>
     <ul>
       <li><b>전체 차이 픽셀 %</b>: 두 프레임에서 값이 다른 픽셀의 비율입니다.</li>
-      <li><b>차이가 큰 부분</b>: 화면을 9개 구역(좌측 상단·상단·…·우측 하단)으로 나눠, 그중 차이 픽셀 비율이 높은 순서대로 보여줍니다.</li>
+      <li><b>차이가 큰 부분</b>: 화면을 가로·세로 각 9칸, 총 81개 구역으로 세분화해 그중 차이 픽셀 비율이 높은 순서대로 보여줍니다. 각 구역은 "가로78%·세로11%"처럼 화면에서의 대략적 위치(왼쪽 위가 0%, 오른쪽 아래가 100%)로 표시됩니다.</li>
       <li><b>차이 강조/겹쳐보기/A만/B만</b>: 차이 강조는 다른 픽셀을 핑크로 표시, 겹쳐보기는 두 프레임을 반씩 섞어 표시, A만/B만은 한쪽만 그대로 표시합니다.</li>
       <li><b>민감도</b>: 오른쪽으로 갈수록 더 작은 색상 차이도 "다르다"고 판정합니다. 인코딩 과정에서 생기는 미세한 노이즈까지 잡히면 왼쪽으로 낮추세요.</li>
       <li>화질·해상도·인코딩이 조금만 달라도 같은 화면이 다르다고 나올 수 있습니다 — 그런 경우 아래 <b>느슨한 비교</b>를 사용하세요.</li>
@@ -395,7 +395,7 @@
     <p>픽셀 색상이 완전히 같은지가 아니라, <b>화면의 각 영역에서 실제로 얼마나/어떻게 움직이는지</b>를 비교합니다. 현재 지점부터 짧은 구간(약 10프레임)을 두 영상에서 함께 재생하듯 훑으며, 프레임이 바뀔 때마다 생기는 밝기 변화량을 "움직임의 양"으로 계산합니다. 이 방식은 화질·노출·인코딩 차이에는 덜 민감하고, <b>동작 자체가 다른 경우</b>(한쪽은 움직이는데 다른 쪽은 멈춰 있다, 움직이는 양이 다르다 등)를 잡아내는 데 적합합니다.</p>
     <ul>
       <li><b>동작 차이 점수</b>: 두 영상의 "영역별 움직임 분포"가 얼마나 다른지를 0~100 사이 값으로 나타냅니다. 0에 가까울수록 두 영상의 움직이는 패턴(어디가 얼마나 움직이는지)이 비슷하고, 값이 클수록 동작 자체가 다릅니다.</li>
-      <li><b>차이가 큰 부분</b>: 9개 구역 중 두 영상의 움직임 비중 차이가 큰 순서대로 보여줍니다.</li>
+      <li><b>차이가 큰 부분</b>: 81개 구역(가로·세로 각 9칸) 중 두 영상의 움직임 비중 차이가 큰 순서대로, 화면 위치(가로%·세로%)로 보여줍니다.</li>
       <li><b>"A만 움직임" / "B만 움직임"</b>: 해당 구역에서 한쪽 영상은 뚜렷하게 움직이는데 다른 쪽은 거의 정지해 있는 경우 표시됩니다. 동작 유무 자체가 다른, 가장 눈에 띄는 차이입니다.</li>
       <li><b>움직임 민감도</b>: 오른쪽으로 갈수록 더 작은 움직임 차이도 "다르다"고 판정합니다.</li>
       <li>분석은 현재 지점부터 약 10프레임 구간을 스캔하므로 정밀 비교보다 계산에 1~2초 더 걸릴 수 있습니다. 두 영상 모두 이 구간에서 움직임이 거의 없으면 "움직임이 거의 없습니다"로 표시됩니다.</li>
@@ -812,7 +812,13 @@ const octxA = offA.getContext('2d', { willReadFrequently: true });
 const octxB = offB.getContext('2d', { willReadFrequently: true });
 const cmpStats = document.getElementById('cmp-stats');
 const cmpTime = document.getElementById('cmp-time');
-const REGIONS = ['좌측 상단', '상단', '우측 상단', '좌측', '중앙', '우측', '좌측 하단', '하단', '우측 하단'];
+const REGION_N = 9; // 기존 3x3(가로·세로 3칸)의 3배로 세분화한 가로·세로 칸 수 → 9x9=81개 구역
+function regionLabel(k) {
+  const row = Math.floor(k / REGION_N), col = k % REGION_N;
+  const x = Math.round((col + 0.5) / REGION_N * 100);
+  const y = Math.round((row + 0.5) / REGION_N * 100);
+  return `가로${x}%·세로${y}%`;
+}
 const MOTION_WINDOW = 10; // 느슨한 비교에서 훑어보는 프레임 수
 const cmp = { open: false, slots: [], a: null, b: null, mode: 'diff', method: 'pixel', thr: 35, motionThr: 8, busy: false, motionData: null };
 
@@ -947,14 +953,14 @@ function renderPixelDiff() {
   const A = ia.data, B = ib.data;
   const out = cmpCtx.createImageData(w, h);
   const O = out.data;
-  const cellDiff = new Array(9).fill(0), cellTot = new Array(9).fill(0);
+  const cellDiff = new Array(REGION_N * REGION_N).fill(0), cellTot = new Array(REGION_N * REGION_N).fill(0);
   let diffCount = 0;
   for (let y = 0; y < h; y++) {
-    const gy = Math.min(2, (y * 3 / h) | 0);
+    const gy = Math.min(REGION_N - 1, (y * REGION_N / h) | 0);
     for (let x = 0; x < w; x++) {
       const i = (y * w + x) * 4;
       const d = Math.abs(A[i] - B[i]) + Math.abs(A[i+1] - B[i+1]) + Math.abs(A[i+2] - B[i+2]);
-      const cell = gy * 3 + Math.min(2, (x * 3 / w) | 0);
+      const cell = gy * REGION_N + Math.min(REGION_N - 1, (x * REGION_N / w) | 0);
       cellTot[cell]++;
       const isDiff = d > cmp.thr;
       if (isDiff) { diffCount++; cellDiff[cell]++; }
@@ -980,7 +986,7 @@ function renderPixelDiff() {
 
   const pct = diffCount / (w * h) * 100;
   const regions = cellDiff
-    .map((c, k) => ({ name: REGIONS[k], pct: c / (cellTot[k] || 1) * 100 }))
+    .map((c, k) => ({ name: regionLabel(k), pct: c / (cellTot[k] || 1) * 100 }))
     .filter(r => r.pct >= 1)
     .sort((p, q) => q.pct - p.pct)
     .slice(0, 4);
@@ -1032,34 +1038,35 @@ document.getElementById('cmp-all-btn').addEventListener('click', renderAllSummar
 
 /* ── 느슨한 비교 (동작 기반) ────────────────
    현재 지점부터 MOTION_WINDOW 프레임을 두 영상에서 함께 훑으며, 프레임이
-   바뀔 때마다 9개 구역(REGIONS)별 밝기 변화량 합을 "움직임 에너지"로 계산.
+   바뀔 때마다 REGION_N×REGION_N 구역별 밝기 변화량 합을 "움직임 에너지"로 계산.
    각 영상의 에너지를 자기 합계로 정규화(움직임 분포 %)해 비교하면 노출·
    화질 차이에는 둔감하면서 "어디가 얼마나 움직이는지" 패턴 차이는 잡아냄 */
 async function regionMotionProfile(video) {
   const w = video.videoWidth, h = video.videoHeight;
   const off = document.createElement('canvas');
-  off.width = 96; off.height = Math.max(1, Math.round(96 * h / w));
+  off.width = 144; off.height = Math.max(1, Math.round(144 * h / w)); // 세분화된 격자에 맞춰 샘플 해상도 상향
   const octx = off.getContext('2d', { willReadFrequently: true });
-  const energy = new Array(9).fill(0);
+  const N = REGION_N * REGION_N;
+  const energy = new Array(N).fill(0);
   const startTime = video.currentTime;
   let prev = null;
   for (let i = 0; i <= MOTION_WINDOW; i++) {
     if (i > 0) await seekWait(video, video.currentTime + 1 / (cmp.a.fps || 30));
     octx.drawImage(video, 0, 0, off.width, off.height);
     const d = octx.getImageData(0, 0, off.width, off.height).data;
-    const lum = new Array(9).fill(0), cnt = new Array(9).fill(0);
+    const lum = new Array(N).fill(0), cnt = new Array(N).fill(0);
     for (let y = 0; y < off.height; y++) {
-      const gy = Math.min(2, (y * 3 / off.height) | 0);
+      const gy = Math.min(REGION_N - 1, (y * REGION_N / off.height) | 0);
       for (let x = 0; x < off.width; x++) {
-        const gx = Math.min(2, (x * 3 / off.width) | 0);
+        const gx = Math.min(REGION_N - 1, (x * REGION_N / off.width) | 0);
         const idx = (y * off.width + x) * 4;
-        const cell = gy * 3 + gx;
+        const cell = gy * REGION_N + gx;
         lum[cell] += d[idx] * 0.299 + d[idx+1] * 0.587 + d[idx+2] * 0.114;
         cnt[cell]++;
       }
     }
-    for (let c = 0; c < 9; c++) lum[c] /= cnt[c] || 1;
-    if (prev) for (let c = 0; c < 9; c++) energy[c] += Math.abs(lum[c] - prev[c]);
+    for (let c = 0; c < N; c++) lum[c] /= cnt[c] || 1;
+    if (prev) for (let c = 0; c < N; c++) energy[c] += Math.abs(lum[c] - prev[c]);
     prev = lum;
   }
   await seekWait(video, startTime); // 분석 후 원래 지점으로 복귀
@@ -1106,7 +1113,7 @@ function paintMotion(data) {
     let tag = '';
     if (aHas && bStill) tag = ' (A만 움직임)';
     else if (bHas && aStill) tag = ' (B만 움직임)';
-    return { name: REGIONS[i], pct: d * 100, tag };
+    return { name: regionLabel(i), pct: d * 100, tag };
   }).filter(Boolean).sort((p, q) => q.pct - p.pct);
 
   // 캔버스에 히트맵 표시: A/B를 섞은 화면 위에, 차이가 큰 구역일수록 진한 핑크
@@ -1114,10 +1121,10 @@ function paintMotion(data) {
   const O = out.data;
   const maxDiff = Math.max(EPS, ...shareDiff);
   for (let y = 0; y < h; y++) {
-    const gy = Math.min(2, (y * 3 / h) | 0);
+    const gy = Math.min(REGION_N - 1, (y * REGION_N / h) | 0);
     for (let x = 0; x < w; x++) {
-      const gx = Math.min(2, (x * 3 / w) | 0);
-      const cell = gy * 3 + gx;
+      const gx = Math.min(REGION_N - 1, (x * REGION_N / w) | 0);
+      const cell = gy * REGION_N + gx;
       const i = (y * w + x) * 4;
       const g = (A[i] * 0.299 + A[i+1] * 0.587 + A[i+2] * 0.114) * 0.45;
       const isFlagged = shareDiff[cell] * 100 >= cmp.motionThr;
