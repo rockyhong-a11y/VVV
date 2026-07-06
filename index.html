@@ -154,6 +154,16 @@
   .time { font-size: 11.5px; color: rgba(255,255,255,.9); font-variant-numeric: tabular-nums; margin: 0 4px; white-space: nowrap; }
   .spacer { flex: 1; }
   .rate-btn { font-size: 12px; font-weight: 700; color: #fff; width: auto; padding: 0 8px; }
+  .skip-btn { font-size: 11.5px; font-weight: 700; color: #fff; width: auto; padding: 0 8px; white-space: nowrap; }
+
+  /* 스와이프/스킵 시 잠깐 표시되는 안내 */
+  .seek-toast {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(0,0,0,.6); color: #fff; padding: 8px 18px; border-radius: 999px;
+    font-size: 14px; font-weight: 700; white-space: nowrap;
+    opacity: 0; pointer-events: none; z-index: 8; transition: opacity .15s;
+  }
+  .seek-toast.show { opacity: 1; }
 
   /* 중앙 재생 오버레이 — 버튼(원) 부분만 클릭을 받아서,
      일시정지 중 영상 위 좌우 드래그(프레임 스크럽)를 방해하지 않게 함 */
@@ -514,6 +524,7 @@ function createSlot(i) {
       </div>
     </div>
     <div class="big-play"><div class="circle">${ICONS.play}</div></div>
+    <div class="seek-toast"></div>
     <div class="ctrl">
       <div class="progress">
         <div class="track">
@@ -523,7 +534,9 @@ function createSlot(i) {
         </div>
       </div>
       <div class="btns">
+        <button class="cbtn skip-btn skip-b" title="10초 뒤로">◀ 10s</button>
         <button class="cbtn toggle">${ICONS.play}</button>
+        <button class="cbtn skip-btn skip-f" title="10초 앞으로">10s ▶</button>
         <button class="cbtn step-b" title="이전 프레임">${ICONS.stepB}</button>
         <button class="cbtn step-f" title="다음 프레임">${ICONS.stepF}</button>
         <button class="cbtn mute">${ICONS.volOff}</button>
@@ -559,6 +572,7 @@ function createSlot(i) {
   const played  = el.querySelector('.played');
   const buffered= el.querySelector('.buffered');
   const dot     = el.querySelector('.dot');
+  const seekToast = el.querySelector('.seek-toast');
 
   const slot = { el, video, rateIdx: 2, objectUrl: null, fps: 30 };
 
@@ -595,22 +609,52 @@ function createSlot(i) {
   el.querySelector('.step-b').addEventListener('click', () => stepFrames(-1));
   el.querySelector('.step-f').addEventListener('click', () => stepFrames(1));
 
-  /* 터치/마우스 프레임 스크럽 — 일시정지 중 영상 위를 좌우로 드래그하면
-     약 24px마다 1프레임씩 이동 */
+  /* 10초 앞/뒤로 이동 — 재생 중이든 일시정지 중이든 항상 동작(재생은 멈추지 않음) */
+  let seekToastTimer = null;
+  function showSeekToast(sec) {
+    seekToast.textContent = (sec > 0 ? '▶▶ +' : '◀◀ ') + Math.abs(sec) + '초';
+    seekToast.classList.remove('show');
+    void seekToast.offsetWidth; // 강제 리플로우로 연속 스와이프 시에도 애니메이션 재시작
+    seekToast.classList.add('show');
+    clearTimeout(seekToastTimer);
+    seekToastTimer = setTimeout(() => seekToast.classList.remove('show'), 700);
+  }
+  function seekBy(sec) {
+    if (!el.classList.contains('loaded')) return;
+    const max = isFinite(video.duration) ? Math.max(0, video.duration - 0.001) : Infinity;
+    video.currentTime = Math.min(max, Math.max(0, video.currentTime + sec));
+    showSeekToast(sec);
+    setUiHidden(false);
+    if (anyPlaying()) scheduleAutoHide(); else clearTimeout(hideTimer);
+  }
+  el.querySelector('.skip-b').addEventListener('click', e => { e.stopPropagation(); seekBy(-10); });
+  el.querySelector('.skip-f').addEventListener('click', e => { e.stopPropagation(); seekBy(10); });
+
+  /* 터치/마우스 제스처: 일시정지 중엔 좌우 드래그로 프레임 스크럽(약 24px당 1프레임),
+     재생 중엔 좌우 스와이프로 10초 앞/뒤 이동(스와이프 한 번에 한 번만 이동) */
+  const SWIPE_PX = 50;
   let scrub = null;
   video.addEventListener('pointerdown', e => {
-    if (!el.classList.contains('loaded') || !video.paused) return;
-    scrub = { x: e.clientX, id: e.pointerId, moved: false };
+    if (!el.classList.contains('loaded')) return;
+    scrub = { x: e.clientX, startX: e.clientX, id: e.pointerId, moved: false, wasPaused: video.paused };
     try { video.setPointerCapture(e.pointerId); } catch (err) {}
   });
   video.addEventListener('pointermove', e => {
     if (!scrub || e.pointerId !== scrub.id) return;
-    const steps = Math.trunc((e.clientX - scrub.x) / 24);
-    if (steps !== 0) { scrub.x += steps * 24; scrub.moved = true; stepFrames(steps); }
+    if (scrub.wasPaused) {
+      const steps = Math.trunc((e.clientX - scrub.x) / 24);
+      if (steps !== 0) { scrub.x += steps * 24; scrub.moved = true; stepFrames(steps); }
+    } else if (!scrub.moved && Math.abs(e.clientX - scrub.startX) > 8) {
+      scrub.moved = true; // 재생 중엔 pointerup에서 스와이프 판정 (여기서는 탭 오인만 방지)
+    }
   });
   const endScrub = e => {
     if (!scrub || e.pointerId !== scrub.id) return;
-    if (scrub.moved) lastTap = { time: 0, x: 0, y: 0 }; // 스크럽 종료가 더블탭으로 오인되지 않게
+    if (!scrub.wasPaused) {
+      const dx = e.clientX - scrub.startX;
+      if (Math.abs(dx) > SWIPE_PX) seekBy(dx > 0 ? 10 : -10);
+    }
+    if (scrub.moved) lastTap = { time: 0, x: 0, y: 0 }; // 스크럽/스와이프 종료가 더블탭으로 오인되지 않게
     scrub = null;
   };
   video.addEventListener('pointerup', endScrub);
