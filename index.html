@@ -627,46 +627,57 @@ function createSlot(i) {
     setUiHidden(false);
     if (anyPlaying()) scheduleAutoHide(); else clearTimeout(hideTimer);
   }
+  // 재생 중 스와이프 전용: 어떤 UI(컨트롤 바·안내 토스트)도 띄우지 않고 조용히 이동만 함.
+  // 일부 영상은 탐색 중 브라우저가 순간적으로 재생을 멈췄다가 다시 시작하는데,
+  // 이때 'pause' 이벤트가 발생해 UI가 튀어나오거나 그대로 멈춰버리는 것을 함께 방지
+  let suppressPauseUi = false;
+  function seekBySilent(sec) {
+    if (!el.classList.contains('loaded')) return;
+    const wasPlaying = !video.paused;
+    const max = isFinite(video.duration) ? Math.max(0, video.duration - 0.001) : Infinity;
+    suppressPauseUi = true;
+    video.currentTime = Math.min(max, Math.max(0, video.currentTime + sec));
+    if (wasPlaying) {
+      let settled = false;
+      const clearSuppress = () => { settled = true; suppressPauseUi = false; };
+      const resume = () => {
+        if (video.paused) video.play().catch(() => {});
+      };
+      video.addEventListener('playing', clearSuppress, { once: true });
+      video.addEventListener('seeked', resume, { once: true });
+      setTimeout(resume, 250);      // seeked가 오지 않는 환경 대비 재생 재시도
+      setTimeout(() => { if (!settled) clearSuppress(); }, 1200); // 최종 안전장치
+    } else {
+      setTimeout(() => { suppressPauseUi = false; }, 500);
+    }
+  }
   el.querySelector('.skip-b').addEventListener('click', e => { e.stopPropagation(); seekBy(-10); });
   el.querySelector('.skip-f').addEventListener('click', e => { e.stopPropagation(); seekBy(10); });
 
   /* 터치/마우스 제스처: 일시정지 중엔 좌우 드래그로 프레임 스크럽(약 24px당 1프레임),
-     재생 중엔 좌우 스와이프로 10초 앞/뒤 이동(스와이프 한 번에 한 번만 이동) */
+     재생 중엔 좌우 스와이프로 10초 앞/뒤 이동. 재생 중 스와이프는 영상만 보이게
+     UI를 전혀 띄우지 않고 조용히 이동한다(버튼 클릭 시에는 기존처럼 안내 표시) */
   const SWIPE_PX = 50;
   let scrub = null;
   video.addEventListener('pointerdown', e => {
     if (!el.classList.contains('loaded')) return;
     scrub = { x: e.clientX, startX: e.clientX, id: e.pointerId, moved: false, wasPaused: video.paused };
     try { video.setPointerCapture(e.pointerId); } catch (err) {}
-    if (!scrub.wasPaused) {
-      // 재생 중 터치를 시작하면 스와이프가 임계값을 넘기 전에도
-      // 시간 표시 등 컨트롤 바가 바로 보이게 함(끝나고 나서야 잠깐 뜨지 않도록)
-      setUiHidden(false);
-      clearTimeout(hideTimer);
-    }
   });
   video.addEventListener('pointermove', e => {
     if (!scrub || e.pointerId !== scrub.id) return;
     if (scrub.wasPaused) {
       const steps = Math.trunc((e.clientX - scrub.x) / 24);
       if (steps !== 0) { scrub.x += steps * 24; scrub.moved = true; stepFrames(steps); }
-    } else {
-      const dx = e.clientX - scrub.startX;
-      if (Math.abs(dx) > 8) scrub.moved = true; // 탭 오인 방지
-      // 드래그 중에도 임계값을 넘으면 미리보기 표시(놓으면 실제로 이동)
-      if (Math.abs(dx) > SWIPE_PX) showSeekToast(dx > 0 ? 10 : -10);
+    } else if (!scrub.moved && Math.abs(e.clientX - scrub.startX) > 8) {
+      scrub.moved = true; // 재생 중엔 pointerup에서 스와이프 판정 (여기서는 탭 오인만 방지)
     }
   });
   const endScrub = e => {
     if (!scrub || e.pointerId !== scrub.id) return;
     if (!scrub.wasPaused) {
       const dx = e.clientX - scrub.startX;
-      if (Math.abs(dx) > SWIPE_PX) {
-        seekBy(dx > 0 ? 10 : -10);
-      } else {
-        seekToast.classList.remove('show'); // 임계값 미달로 이동 없음 — 미리보기 숨김
-        if (anyPlaying()) scheduleAutoHide(); else clearTimeout(hideTimer);
-      }
+      if (Math.abs(dx) > SWIPE_PX) seekBySilent(dx > 0 ? 10 : -10);
     }
     if (scrub.moved) lastTap = { time: 0, x: 0, y: 0 }; // 스크럽/스와이프 종료가 더블탭으로 오인되지 않게
     scrub = null;
@@ -762,6 +773,7 @@ function createSlot(i) {
     setUiHidden(false); scheduleAutoHide();
   });
   video.addEventListener('pause', () => {
+    if (suppressPauseUi) return; // 조용한 탐색(스와이프) 중 브라우저가 순간 멈춘 것 — 곧 자동 재개되므로 무시
     el.classList.add('paused'); toggle.innerHTML = ICONS.play;
     setUiHidden(false);
     if (anyPlaying()) scheduleAutoHide(); else clearTimeout(hideTimer);
