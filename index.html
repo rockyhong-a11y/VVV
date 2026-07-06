@@ -638,21 +638,35 @@ function createSlot(i) {
     if (!el.classList.contains('loaded')) return;
     scrub = { x: e.clientX, startX: e.clientX, id: e.pointerId, moved: false, wasPaused: video.paused };
     try { video.setPointerCapture(e.pointerId); } catch (err) {}
+    if (!scrub.wasPaused) {
+      // 재생 중 터치를 시작하면 스와이프가 임계값을 넘기 전에도
+      // 시간 표시 등 컨트롤 바가 바로 보이게 함(끝나고 나서야 잠깐 뜨지 않도록)
+      setUiHidden(false);
+      clearTimeout(hideTimer);
+    }
   });
   video.addEventListener('pointermove', e => {
     if (!scrub || e.pointerId !== scrub.id) return;
     if (scrub.wasPaused) {
       const steps = Math.trunc((e.clientX - scrub.x) / 24);
       if (steps !== 0) { scrub.x += steps * 24; scrub.moved = true; stepFrames(steps); }
-    } else if (!scrub.moved && Math.abs(e.clientX - scrub.startX) > 8) {
-      scrub.moved = true; // 재생 중엔 pointerup에서 스와이프 판정 (여기서는 탭 오인만 방지)
+    } else {
+      const dx = e.clientX - scrub.startX;
+      if (Math.abs(dx) > 8) scrub.moved = true; // 탭 오인 방지
+      // 드래그 중에도 임계값을 넘으면 미리보기 표시(놓으면 실제로 이동)
+      if (Math.abs(dx) > SWIPE_PX) showSeekToast(dx > 0 ? 10 : -10);
     }
   });
   const endScrub = e => {
     if (!scrub || e.pointerId !== scrub.id) return;
     if (!scrub.wasPaused) {
       const dx = e.clientX - scrub.startX;
-      if (Math.abs(dx) > SWIPE_PX) seekBy(dx > 0 ? 10 : -10);
+      if (Math.abs(dx) > SWIPE_PX) {
+        seekBy(dx > 0 ? 10 : -10);
+      } else {
+        seekToast.classList.remove('show'); // 임계값 미달로 이동 없음 — 미리보기 숨김
+        if (anyPlaying()) scheduleAutoHide(); else clearTimeout(hideTimer);
+      }
     }
     if (scrub.moved) lastTap = { time: 0, x: 0, y: 0 }; // 스크럽/스와이프 종료가 더블탭으로 오인되지 않게
     scrub = null;
