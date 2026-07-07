@@ -87,6 +87,7 @@
     border: 1px solid #1d2029;
   }
   .slot video { width: 100%; height: 100%; object-fit: fill; display: block; background: #000; touch-action: none; }
+  #grid.fit-contain .slot video { object-fit: contain; }
 
   /* 빈 상태 */
   .empty {
@@ -329,6 +330,7 @@
     <button class="g-btn" id="playAll">▶ 전체재생</button>
     <button class="g-btn" id="pauseAll">⏸ 전체정지</button>
     <button class="g-btn" id="muteAll">🔊 음소거 해제</button>
+    <button class="g-btn" id="fitToggle">⬜ 원본 비율로</button>
     <button class="g-btn" id="cmpOpen">🔍 비교</button>
   </div>
 </header>
@@ -896,6 +898,14 @@ document.getElementById('muteAll').addEventListener('click', function () {
     s.el.querySelector('.mute').innerHTML = allMuted ? ICONS.volOff : ICONS.volOn;
   });
   this.textContent = allMuted ? '🔊 음소거 해제' : '🔇 음소거';
+});
+
+/* 종횡비 옵션: 원본 비율 유지(레터박스) ↔ 화면 꽉 차게 늘리기(기본값) */
+let fitContain = false;
+document.getElementById('fitToggle').addEventListener('click', function () {
+  fitContain = !fitContain;
+  grid.classList.toggle('fit-contain', fitContain);
+  this.textContent = fitContain ? '🔲 꽉 차게' : '⬜ 원본 비율로';
 });
 
 /* ── 프레임 비교 분석 ──────────────────────
